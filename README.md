@@ -42,8 +42,8 @@ support@payfast.io should you require any assistance.
 4. **Paybatch Setup**
 
     - A client who does not have a valid vault id saved will have the vault id stored once they have made a payment
-      using Payfast Gateway (provided vaulting is enabled). This vault id is used for future Payfast Gateway payments (
-      where only the CVV is entered) and for PayBatch transactions.
+      using Payfast Gateway (provided vaulting is enabled). This vault id is used for future Payfast Gateway payments
+      (where only the CVV is entered) and for PayBatch transactions.
 
 4. **Recurring Payments**
 
@@ -62,7 +62,7 @@ support@payfast.io should you require any assistance.
         - Inserts a sent_invoice record for each invoice.
         - Prevents re-sending invoices already in a pending batch.
 
-    - Key behavior:
+    - Key behaviour:
         - Only invoices WITHOUT a sent_invoice record are included.
         - Other unpaid invoices may still be included in new batches.
         - Prevents duplicate batch submissions.
