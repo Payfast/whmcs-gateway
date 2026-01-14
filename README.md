@@ -10,7 +10,7 @@ support@payfast.io should you require any assistance.
 1. **Download the Plugin**
 
     - Visit the [releases page](https://github.com/Payfast/whmcs-gateway/releases) and
-      download [paybatch_payhost_plugin.zip](https://github.com/Payfast/whmcs-gateway/releases/download/v1.5.0/paybatch_payhost_plugin.zip).
+      download [paybatch_payhost_plugin.zip](https://github.com/Payfast/whmcs-gateway/releases/download/v2.0.0/paybatch_payhost_plugin.zip).
 
 2. **Install the Plugin**
 
