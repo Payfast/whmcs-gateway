@@ -1,14 +1,15 @@
 <?php
+
 /*
- * Copyright (c) 2023 PayGate (Pty) Ltd
+ * Copyright (c) 2025 Payfast (Pty) Ltd
  *
  * Author: App Inlet (Pty) Ltd
  *
  * Released under the GNU General Public License
  *
- * This module facilitates PayGate payments by means of PayHost / PayBatch for WHMCS clients
+ * This module facilitates Payfast payments by means of Payfast Gateway / PayBatch for WHMCS clients
  *
- * PayHost is used to initialise and vault card detail, successive payments are made using the vault and PayBatch
+ * Payfast Gateway is used to initialise and vault card detail, successive payments are made using the vault and PayBatch
  *
  */
 
@@ -18,49 +19,95 @@ require_once __DIR__ . '/../../includes/gatewayfunctions.php';
 require_once __DIR__ . '/../../includes/invoicefunctions.php';
 
 require_once 'payhostpaybatch/lib/constants.php';
-require_once 'payhostpaybatch/lib/payhostsoap.class.php';
+require_once 'payhostpaybatch/classes/request/paybatchSoap.class.php';
+require_once 'payhostpaybatch/classes/request/payhostSoap.class.php';
 
-if ( ! defined("WHMCS")) {
-    die("This file cannot be accessed directly");
+// Function to define a constant if not already defined
+/**
+ * @param string $name
+ * @param string $value
+ *
+ * @return void
+ */
+function defineConstant(string $name, string $value): void
+{
+    if (!defined($name)) {
+        define($name, $value);
+    }
 }
 
+// Function to ensure WHMCS context
+/**
+ * @return void
+ */
+function checkWHMCS(): void
+{
+    if (!defined('WHMCS')) {
+        die('This file cannot be accessed directly');
+    }
+}
+
+// Main execution
+checkWHMCS();
+
+use Payhost\classes\request\PayhostSoap;
 use WHMCS\Database\Capsule;
 
-if ( ! defined('_DB_PREFIX_')) {
-    define('_DB_PREFIX_', 'tbl');
-}
+defineConstant('DB_PREFIX', 'tbl');
 
 /**
  * Check for existence of payhostpaybatch table and create if not
  */
-if ( ! function_exists('createPayhostpaybatchTable')) {
-    function createPayhostpaybatchTable()
+if (!function_exists('createPayhostpaybatchTable')) {
+    /**
+     * @return bool
+     */
+    function createPayhostpaybatchTable(): bool
     {
-        $query = "create table if not exists `" . _DB_PREFIX_ . "payhostpaybatch` (";
-        $query .= " id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY, ";
-        $query .= " recordtype VARCHAR(20) NOT NULL, ";
-        $query .= " recordid VARCHAR(50) NOT NULL, ";
-        $query .= " recordval VARCHAR(50) NOT NULL, ";
-        $query .= " dbid VARCHAR(10) NOT NULL DEFAULT '1')";
+        try {
+            if (!Capsule::schema()->hasTable(DB_PREFIX . 'payhostpaybatch')) {
+                Capsule::schema()->create(DB_PREFIX . 'payhostpaybatch', function ($table) {
+                    $table->increments('id');
+                    $table->string('recordtype', 20);
+                    $table->string('recordid', 50);
+                    $table->string('recordval', 50);
+                    $table->string('dbid', 10)->default('1');
+                    $table->timestamps();
+                });
+            }
 
-        return full_query($query);
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
     }
 }
 
 /**
  * Check for existence of payhostpaybatchvaults table and create if not
  */
-if ( ! function_exists('createPayhostpaybatchVaultTable')) {
-    function createPayhostpaybatchVaultTable()
+if (!function_exists('createPayhostpaybatchVaultTable')) {
+    /**
+     * @return bool
+     */
+    function createPayhostpaybatchVaultTable(): bool
     {
-        $query = "create table if not exists `" . _DB_PREFIX_ . "payhostpaybatchvaults` (";
-        $query .= " id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY, ";
-        $query .= " user_id INT NOT NULL, ";
-        $query .= " token VARCHAR(50) NOT NULL, ";
-        $query .= " card_number VARCHAR(50) NOT NULL, ";
-        $query .= " card_expiry VARCHAR(10) NOT NULL)";
+        try {
+            if (!Capsule::schema()->hasTable(DB_PREFIX . 'payhostpaybatchvaults')) {
+                Capsule::schema()->create(DB_PREFIX . 'payhostpaybatchvaults', function ($table) {
+                    $table->increments('id');
+                    $table->integer('user_id');
+                    $table->string('token', 50);
+                    $table->string('card_number', 50);
+                    $table->string('card_expiry', 10);
+                    $table->timestamps();
+                });
+            }
 
-        return full_query($query);
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
     }
 }
 
@@ -80,14 +127,14 @@ if (isset($_POST['INITIATE']) && $_POST['INITIATE'] == 'initiate') {
  *
  * @return array
  */
-function payhostpaybatch_MetaData()
+function payhostpaybatch_MetaData(): array
 {
-    return array(
-        'DisplayName'                => 'PayGate PayHost / PayBatch',
+    return [
+        'DisplayName'                => 'Payfast Gateway / PayBatch',
         'APIVersion'                 => '1.1', // Use API Version 1.1
         'DisableLocalCredtCardInput' => true,
         'TokenisedStorage'           => true,
-    );
+    ];
 }
 
 /**
@@ -96,78 +143,107 @@ function payhostpaybatch_MetaData()
  *
  * @return array
  */
-function payhostpaybatch_config()
+function payhostpaybatch_config(): array
 {
-    return array(
+    return [
         // The friendly display name for a payment gateway should be
         // defined here for backwards compatibility
-        'FriendlyName'                => array(
+        'FriendlyName'                => [
             'Type'  => 'System',
-            'Value' => 'PayGate PayHost / PayBatch Gateway',
-        ),
+            'Value' => 'Payfast',
+        ],
         // A text field type allows for single line text input
-        'payHostID'                   => array(
-            'FriendlyName' => 'PayHost ID',
+        'payHostID'                   => [
+            'FriendlyName' => 'Terminal ID',
             'Type'         => 'text',
             'Size'         => '11',
             'Default'      => '',
-            'Description'  => 'Enter your PayHost ID here',
-        ),
+            'Description'  => 'Enter your Terminal ID here',
+        ],
         // A password field type allows for masked text input
-        'payHostSecretKey'            => array(
-            'FriendlyName' => 'PayHost Secret Key',
+        'payHostSecretKey'            => [
+            'FriendlyName' => 'Encryption Key',
             'Type'         => 'password',
             'Size'         => '32',
             'Default'      => '',
-            'Description'  => 'Enter your PayHost password here',
-        ),
+            'Description'  => 'Enter your Payfast Gateway encryption key here',
+        ],
         // A text field type allows for single line text input
-        'payBatchID'                  => array(
+        'payBatchID'                  => [
             'FriendlyName' => 'PayBatch ID',
             'Type'         => 'text',
             'Size'         => '11',
             'Default'      => '',
             'Description'  => 'Enter your PayBatch ID here',
-        ),
+        ],
         // A password field type allows for masked text input
-        'payBatchSecretKey'           => array(
+        'payBatchSecretKey'           => [
             'FriendlyName' => 'PayBatch Secret Key',
             'Type'         => 'password',
             'Size'         => '32',
             'Default'      => '',
             'Description'  => 'Enter your PayBatch password here',
-        ),
+        ],
         // The yesno field type displays a single checkbox option
-        'testMode'                    => array(
+        'testMode'                    => [
             'FriendlyName' => 'Test Mode',
             'Type'         => 'yesno',
             'Description'  => 'Tick to enable test mode',
-        ),
+        ],
         // Enable or disable 3D Secure Authentication
-        '3D'                          => array(
+        '3D'                          => [
             'FriendlyName' => '3D Secure Authentication',
             'Type'         => 'yesno',
             'Default'      => 'Yes',
-        ),
+        ],
         // Enable or disable card vaulting
-        'payhostpaybatch_vaulting'    => array(
+        'payhostpaybatch_vaulting'    => [
             'FriendlyName' => 'Allow card vaulting',
             'Type'         => 'yesno',
             'Default'      => 'Yes',
-        ),
+        ],
         // Enable or disable recurring payments
-        'payhostpaybatch_recurring'   => array(
+        'payhostpaybatch_recurring'   => [
             'FriendlyName' => 'Allow recurring payments',
             'Type'         => 'yesno',
             'Default'      => 'Yes',
-        ),
+        ],
         // Enable or disable paybatch auto currency conversion
-        'payhostpaybatch_autoconvert' => array(
+        'payhostpaybatch_autoconvert' => [
             'FriendlyName' => 'Enable auto convert to ZAR for PayBatch',
             'Type'         => 'yesno',
             'Default'      => 'Yes',
-        ),
-    );
+        ],
+        // WHMCS API Configuration for cron jobs
+        'whmcs_api_identifier'        => [
+            'FriendlyName' => 'WHMCS API Identifier',
+            'Type'         => 'text',
+            'Size'         => '50',
+            'Default'      => '',
+            'Description'  => 'Your WHMCS API Identifier for cron job access',
+        ],
+        'whmcs_api_secret'            => [
+            'FriendlyName' => 'WHMCS API Secret',
+            'Type'         => 'password',
+            'Size'         => '50',
+            'Default'      => '',
+            'Description'  => 'Your WHMCS API Secret for cron job access',
+        ],
+        'whmcs_api_access_key'        => [
+            'FriendlyName' => 'WHMCS API Access Key',
+            'Type'         => 'password',
+            'Size'         => '50',
+            'Default'      => '',
+            'Description'  => 'Your WHMCS API Access Key for cron job access',
+        ],
+        'whmcs_api_url'               => [
+            'FriendlyName' => 'WHMCS API URL',
+            'Type'         => 'text',
+            'Size'         => '100',
+            'Default'      => '',
+            'Description'  => 'Full URL to your WHMCS API endpoint (e.g., https://yourdomain.com/includes/api.php)',
+        ],
+    ];
 }
 
 /**
@@ -175,18 +251,20 @@ function payhostpaybatch_config()
  *
  * Defines the HTML output displayed on an invoice
  *
+ * @param $params
+ *
  * @return string
  */
-function payhostpaybatch_link($params)
+function payhostpaybatch_link($params): string
 {
     $jparams  = base64_encode(json_encode($params));
     $vaulting = $params['payhostpaybatch_vaulting'] === 'on';
+    $html     = '';
 
     // Check for values of correct format stored in tblclients->cardnum : we will use this to store the card vault id
     $vaultIds                 = [];
-    $tblpayhostpaybatchvaults = _DB_PREFIX_ . 'payhostpaybatchvaults';
+    $tblpayhostpaybatchvaults = DB_PREFIX . 'payhostpaybatchvaults';
     if ($vaulting) {
-        $vaultIds     = [];
         $vaults       = Capsule::table($tblpayhostpaybatchvaults)
                                ->where('user_id', $params['clientdetails']['userid'])
                                ->select()
@@ -206,7 +284,7 @@ function payhostpaybatch_link($params)
     $html .= <<<HTML
     <form method="post" action="modules/gateways/payhostpaybatch.php">
     <input type="hidden" name="INITIATE" value="initiate">
-    <input type="hidden" name="jparams" value="$jparams">   
+    <input type="hidden" name="jparams" value="$jparams">
 HTML;
     if ($vaulting) {
         $html .= '<select name="card-token">';
@@ -221,7 +299,7 @@ HTML;
     }
 
     $html .= <<<HTML
-    <input type="submit" value="Pay using PayHost">
+    <input type="submit" value="Pay using Payfast">
 </form>
 HTML;
 
@@ -231,11 +309,13 @@ HTML;
 /**
  * Payment process
  *
- * Process payment to PayHost
+ * Process payment to Payfast Gateway
  *
- * @return string
+ * @param array $params
+ *
+ * @return void
  */
-function payhostpaybatch_initiate($params)
+function payhostpaybatch_initiate(array $params): void
 {
     // Check if test mode or not
     $testMode = $params['testMode'];
@@ -249,7 +329,7 @@ function payhostpaybatch_initiate($params)
 
     $user_id = $params['clientdetails']['id'];
 
-    $handle_card = filter_var($_POST['card-token'], FILTER_SANITIZE_STRING);
+    $handle_card = htmlspecialchars($_POST['card-token'], ENT_QUOTES, 'UTF-8');
 
     $gatewayModuleName = basename(__FILE__, '.php');
     $html              = '';
@@ -262,8 +342,6 @@ function payhostpaybatch_initiate($params)
     if ((int)$handle_card > 0) {
         $vault_id = $handle_card;
     }
-
-    $usePayBatch = false;
 
     // System Parameters
     $companyName       = $params['companyname'];
@@ -282,30 +360,32 @@ function payhostpaybatch_initiate($params)
     $transactionDate = date('Y-m-d\TH:i:s');
 
     // Client Parameters
-    $firstname = $params['clientdetails']['firstname'];
-    $lastname  = $params['clientdetails']['lastname'];
-    $email     = $params['clientdetails']['email'];
-    $address1  = $params['clientdetails']['address1'];
-    $address2  = $params['clientdetails']['address2'];
-    $city      = $params['clientdetails']['city'];
-    $state     = $params['clientdetails']['state'];
-    $postcode  = $params['clientdetails']['postcode'];
-    $country   = $params['clientdetails']['country'];
-    $phone     = $params['clientdetails']['phonenumber'];
+    $clientDetails = getClientDetails($params);
+
+    $firstname = $clientDetails['firstname'];
+    $lastname  = $clientDetails['lastname'];
+    $email     = $clientDetails['email'];
+    $address1  = $clientDetails['address1'];
+    $address2  = $clientDetails['address2'];
+    $city      = $clientDetails['city'];
+    $state     = $clientDetails['state'];
+    $postcode  = $clientDetails['postcode'];
+    $country   = $clientDetails['country'] == 'ZA' ? 'ZAF' : $clientDetails['country'];
+    $phone     = $clientDetails['phone'];
 
     // Invoice Parameters
     $invoiceId    = $params['invoiceid'];
-    $description  = $params["description"];
+    $description  = $params['description'];
     $amount       = $params['amount'];
     $currencyCode = $params['currency'];
 
     // Get vault id from database
-    $tblpayhostpaybatch = _DB_PREFIX_ . 'payhostpaybatch';
+    $tblpayhostpaybatch = DB_PREFIX . 'payhostpaybatch';
     if ($vaulting) {
-        $tblpayhostpaybatchvaults = _DB_PREFIX_ . 'payhostpaybatchvaults';
+        $tblpayhostpaybatchvaults = DB_PREFIX . 'payhostpaybatchvaults';
         $vaultId                  = Capsule::table($tblpayhostpaybatchvaults)
                                            ->where('user_id', $params['clientdetails']['userid'])
-                                           ->where('id', $vault_id)
+                                           ->where('id', $vault_id ?? null)
                                            ->value('token');
         $vaultPattern             = '/^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$/';
         if (preg_match($vaultPattern, $vaultId) != 1) {
@@ -313,9 +393,9 @@ function payhostpaybatch_initiate($params)
         }
     }
 
-    // A web payment request - use PayHost WebPayment request for redirect
+    // A web payment request - use Payfast Gateway WebPayment request for redirect
 
-    $payhostSoap = new payhostsoap();
+    $payhostSoap = new PayhostSoap();
 
     // Set data
     $data                  = [];
@@ -329,13 +409,20 @@ function payhostpaybatch_initiate($params)
     $data['firstName']     = $firstname;
     $data['lastName']      = $lastname;
     $data['email']         = $email;
-    $data['customerTitle'] = isset($data['customerTitle']) ? $data['customerTitle'] : 'Mr';
-    $data['country']       = 'ZAF';
+    $data['customerTitle'] = $data['customerTitle'] ?? 'Mr';
+    $data['country']       = $country ?? 'ZAF';
     $data['retUrl']        = $returnUrl;
     $data['notifyURL']     = $notifyUrl;
-    $data['recurring']     = $usePayBatch;
+    $data['recurring']     = false;
     $data['userKey1']      = 'user_id';
     $data['userField1']    = $user_id;
+    $data['state']         = $state;
+    $data['address1']      = $address1;
+    $data['address2']      = $address2;
+    $data['city']          = $city;
+    $data['postcode']      = $postcode;
+    $data['phone']         = $phone;
+
     if ($vaulting) {
         $data['vaulting'] = true;
     }
@@ -347,9 +434,27 @@ function payhostpaybatch_initiate($params)
 
     $xml = $payhostSoap->getSOAP();
 
+    sendSOAPRequest($xml, $tblpayhostpaybatch, $payHostSecretKey);
+}
+
+/**
+ * @param string $xml
+ * @param string $tblpayhostpaybatch
+ * @param string $payHostSecretKey
+ *
+ * @return void
+ */
+function sendSOAPRequest(string $xml, string $tblpayhostpaybatch, string $payHostSecretKey): void
+{
     // Use PHP SoapClient to handle request
     ini_set('soap.wsdl_cache', 0);
-    $soapClient = new SoapClient(PAYHOSTAPIWSDL, ['trace' => 1]);
+    try {
+        $soapClient = new SoapClient(PAYHOSTAPIWSDL, ['trace' => 1]);
+    } catch (SoapFault $fault) {
+        echo $fault->getMessage() . PHP_EOL;
+
+        return;
+    }
 
     try {
         $result = $soapClient->__soapCall(
@@ -359,7 +464,7 @@ function payhostpaybatch_initiate($params)
             ]
         );
 
-        if (array_key_exists('Redirect', (array)$result->WebPaymentResponse)) {
+        if (property_exists($result->WebPaymentResponse, 'Redirect')) {
             // Redirect to Payment Portal
             // Store key values for return response
 
@@ -382,18 +487,19 @@ function payhostpaybatch_initiate($params)
 
             // Do redirect
             // First check that the checksum is valid
-            $d = $result->WebPaymentResponse->Redirect->UrlParams;
+            $urlParamsdata = $result->WebPaymentResponse->Redirect->UrlParams;
 
-            $checkSource = $d[0]->value;
-            $checkSource .= $d[1]->value;
-            $checkSource .= $d[2]->value;
+            $checkSource = $urlParamsdata[0]->value;
+            $checkSource .= $urlParamsdata[1]->value;
+            $checkSource .= $urlParamsdata[2]->value;
             $checkSource .= $payHostSecretKey;
             $check       = md5($checkSource);
-            if ($check == $d[3]->value) {
-                $inputs = $d;
 
-                $html = <<<HTML
-        <form action="{$result->WebPaymentResponse->Redirect->RedirectUrl}" method="post" name="payhost">
+            if ($check == $urlParamsdata[3]->value) {
+                $inputs = $urlParamsdata;
+
+                echo <<<HTML
+        <form action="{$result->WebPaymentResponse->Redirect->RedirectUrl}" method="post" name="payhost" id="pahost">
         <input type="hidden" name="{$inputs[0]->key}" value="{$inputs[0]->value}" />
         <input type="hidden" name="{$inputs[1]->key}" value="{$inputs[1]->value}" />
         <input type="hidden" name="{$inputs[2]->key}" value="{$inputs[2]->value}" />
@@ -401,15 +507,34 @@ function payhostpaybatch_initiate($params)
         </form>
         <script type="text/javascript"> document.forms['payhost'].submit();</script>
 HTML;
-                echo $html;
             }
         } else {
-            // Process response - doesn't happen
+            echo 'No redirect URL found in response.';
         }
-    } catch (SoapFault $f) {
-        var_dump($f);
+    } catch (SoapFault $fault) {
+        echo 'SOAP Fault: ' . $fault->getMessage();
     }
-    echo $html;
+}
+
+/**
+ * @param array $params
+ *
+ * @return array
+ */
+function getClientDetails(array $params): array
+{
+    return [
+        'firstname' => $params['clientdetails']['firstname'],
+        'lastname'  => $params['clientdetails']['lastname'],
+        'email'     => $params['clientdetails']['email'],
+        'address1'  => $params['clientdetails']['address1'],
+        'address2'  => $params['clientdetails']['address2'],
+        'city'      => $params['clientdetails']['city'],
+        'state'     => $params['clientdetails']['state'],
+        'postcode'  => $params['clientdetails']['postcode'],
+        'country'   => $params['clientdetails']['country'],
+        'phone'     => $params['clientdetails']['phonenumber']
+    ];
 }
 
 /**
@@ -417,9 +542,11 @@ HTML;
  *
  * Called when a refund is requested for a previously successful transaction
  *
+ * @param array $params
+ *
  * @return array Transaction response status
  */
-function payhostpaybatch_refund($params)
+function payhostpaybatch_refund(array $params): array
 {
     // Gateway Configuration Parameters
     $accountId     = $params['accountID'];
@@ -456,16 +583,16 @@ function payhostpaybatch_refund($params)
 
     // Perform API call to initiate refund and interpret result
 
-    return array(
+    return [
         // 'success' if successful, otherwise 'declined', 'error' for failure
         'status'  => 'success',
         // Data to be recorded in the gateway log - can be a string or array
-        'rawdata' => $responseData,
+        'rawdata' => $responseData ?? [],
         // Unique Transaction ID for the refund transaction
-        'transid' => $refundTransactionId,
+        'transid' => $refundTransactionId ?? '',
         // Optional fee amount for the fee value refunded
-        'fees'    => $feeAmount,
-    );
+        'fees'    => $feeAmount ?? 0,
+    ];
 }
 
 /**
@@ -475,9 +602,11 @@ function payhostpaybatch_refund($params)
  * ID in tblhosting.subscriptionid, this function is called upon cancellation
  * or request by an admin user
  *
+ * @param array $params
+ *
  * @return array Transaction response status
  */
-function payhostpaybatch_cancelSubscription($params)
+function payhostpaybatch_cancelSubscription(array $params): array
 {
     // Gateway Configuration Parameters
     $accountId     = $params['accountID'];
@@ -500,10 +629,10 @@ function payhostpaybatch_cancelSubscription($params)
 
     // Perform API call to cancel subscription and interpret result
 
-    return array(
+    return [
         // 'success' if successful, any other value for failure
         'status'  => 'success',
         // Data to be recorded in the gateway log - can be a string or array
-        'rawdata' => $responseData,
-    );
+        'rawdata' => $responseData ?? [],
+    ];
 }

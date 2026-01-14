@@ -1,6 +1,6 @@
 <?php
 /*
- * Copyright (c) 2023 PayGate (Pty) Ltd
+ * Copyright (c) 2025 Payfast (Pty) Ltd
  *
  * Author: App Inlet (Pty) Ltd
  *
@@ -10,55 +10,61 @@
  *
  */
 
-class paybatchsoap
+
+/**
+ *
+ */
+class PaybatchSoapCron
 {
     /**
-     * @var string the url of the PayGate PayBatch process page
+     * @var string the url of the Payfast Gateway with PayBatch process page
      */
-    public static $process_url = PAYBATCHAPI;
+    public static string $processUrl = PAYBATCHAPI;
 
     /**
-     * @var string the url of the PayGate PayBatch WSDL
+     * @var string the url of the Payfast Gateway with PayBatch WSDL
      */
-    public static $wsdl = PAYBATCHAPIWSDL;
+    public static string $wsdl = PAYBATCHAPIWSDL;
 
     /**
      * @var string default namespace. We add the namespace manually because of PHP's "quirks"
      */
-    private static $ns = 'ns1';
+    private static string $ns = 'ns1';
 
     /**
      * @var string $notifyUrl
      */
-    private static $notifyUrl;
+    private static string $notifyUrl;
 
     /**
      * @var string $soapStart , $soapEnd
      * SOAP HEADERS
      */
-    private static $soapStart = '<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/">
+    private static string $soapStart = '<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/">
     <SOAP-ENV:Header/>
     <SOAP-ENV:Body>';
-    private static $soapend = '</SOAP-ENV:Body>
+    private static string $soapend = '</SOAP-ENV:Body>
 </SOAP-ENV:Envelope>';
 
     /**
      * @var array of data for batchline
      */
-    protected $batchData = [];
+    protected array $batchData = [];
 
-    protected $batchReference = 'PayBatch_';
+    protected string $batchReference = 'PayBatch_';
 
     public function __construct()
     {
         $this->batchReference = date('Y-m-d') . '_' . uniqid();
-        $this::$notifyUrl     = 'https://www.xtestyz854.com';
+        self::$notifyUrl      = 'https://www.xtestyz854.com';
     }
 
     /**
-     * @param $data input data array
+     * @param array $data
+     *
+     * @return array|false|string|string[]
      */
-    public function getAuthRequest($data)
+    public function getAuthRequest(array $data): string|bool
     {
         $this->batchReference = date('Y-m-d') . '_' . uniqid();
         $this->setBatchData($data);
@@ -66,7 +72,7 @@ class paybatchsoap
             // Use SimpleXMLElement to build structure
             $xml = new SimpleXMLElement('<Auth />');
             $xml->addChild('BatchReference', $this->batchReference);
-            $xml->addChild('NotificationUrl', $this::$notifyUrl);
+            $xml->addChild('NotificationUrl', self::$notifyUrl);
 
             $batchData = $xml->addChild('BatchData');
             foreach ($this->batchData as $line) {
@@ -85,18 +91,16 @@ class paybatchsoap
             $soap = $dom->saveXML($dom->documentElement);
 
             // Remove Auth tag - added in __soapCall
-            $childrenOnly = str_replace(['<Auth>', '</Auth>'], '', $soap);
-
-            return $childrenOnly;
-        } catch (Exception $e) {
-            return $e->getMessage();
+            return str_replace(['<Auth>', '</Auth>'], '', $soap);
+        } catch (Exception $exception) {
+            return $exception->getMessage();
         }
     }
 
     /**
-     * @param $data array of batchline type
+     * @param array $data of batchline type
      */
-    public function setBatchData($data)
+    public function setBatchData(array $data): void
     {
         $this->batchData = [];
         foreach ($data as $line) {
@@ -104,30 +108,32 @@ class paybatchsoap
         }
     }
 
-    public function getConfirmRequest($uploadId)
+    /**
+     * @param $uploadId
+     *
+     * @return array|false|string|string[]
+     */
+    public function getConfirmRequest(string $uploadId): string|bool
     {
-        try {
-            // Use SimpleXmlElement for better control of children
-            $xml = new SimpleXMLElement('<Query />');
-
-            $xml->addChild('UploadID', $uploadId);
-
-            // Use DomDocument to remove XML headers
-            $dom = new DOMDocument();
-            $dom->loadXML($xml->asXML());
-
-            $soap = $dom->saveXML($dom->documentElement);
-
-            // Remove Confirm tag because we pass it in the __soapCall
-            $childrenOnly = str_replace(['<Query>', '</Query>'], '', $soap);
-
-            return $childrenOnly;
-        } catch (Exception $e) {
-            return $e->getMessage();
-        }
+        return $this->processRequest($uploadId);
     }
 
-    public function getQueryRequest($uploadId)
+    /**
+     * @param $uploadId
+     *
+     * @return array|false|string|string[]
+     */
+    public function getQueryRequest(string $uploadId): string|bool
+    {
+        return $this->processRequest($uploadId);
+    }
+
+    /**
+     * @param $uploadId
+     *
+     * @return array|false|string|string[]
+     */
+    private function processRequest(string $uploadId): string|bool
     {
         try {
             // Use SimpleXmlElement for better control of children
@@ -141,12 +147,10 @@ class paybatchsoap
 
             $soap = $dom->saveXML($dom->documentElement);
 
-            // Remove Confirm tag because we pass it in the __soapCall
-            $childrenOnly = str_replace(['<Query>', '</Query>'], '', $soap);
-
-            return $childrenOnly;
-        } catch (Exception $e) {
-            return $e->getMessage();
+            // Remove root tag because we pass it in the __soapCall
+            return str_replace(['<Query>', '</Query>'], '', $soap);
+        } catch (Exception $exception) {
+            return $exception->getMessage();
         }
     }
 }
