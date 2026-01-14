@@ -1,12 +1,12 @@
 <?php
 /*
- * Copyright (c) 2023 PayGate (Pty) Ltd
+ * Copyright (c) 2025 Payfast (Pty) Ltd
  *
  * Author: App Inlet (Pty) Ltd
  *
  * Released under the GNU General Public License
  *
- * This file handles the return POST from a PayHost or PayBatch transactionId
+ * This file handles the return POST from a Payfast Gateway with PayBatch transactionId
  *
  */
 
@@ -16,62 +16,73 @@ require_once __DIR__ . '/../../../includes/gatewayfunctions.php';
 require_once __DIR__ . '/../../../includes/invoicefunctions.php';
 require_once '../payhostpaybatch/lib/constants.php';
 
-if ( ! defined("WHMCS")) {
-    die("This file cannot be accessed directly");
+if (!defined('WHMCS')) {
+    die('This file cannot be accessed directly');
 }
 
 use WHMCS\Database\Capsule;
 
-if ( ! defined('_DB_PREFIX_')) {
-    define('_DB_PREFIX_', 'tbl');
+if (!defined('DB_PREFIX')) {
+    define('DB_PREFIX', 'tbl');
 }
 
 /**
  * Check for existence of payhostpaybatch table and create if not
  */
-if ( ! function_exists('createPayhostpaybatchTable')) {
-    function createPayhostpaybatchTable()
+if (!function_exists('createPayhostpaybatchTable')) {
+    /**
+     * @return bool
+     */
+    function createPayhostpaybatchTable(): bool
     {
-        $query = "create table if not exists `" . _DB_PREFIX_ . "payhostpaybatch` (";
-        $query .= " id INT(6) UNSIGNED AUTO_INCREMENT PRIMARY KEY, ";
-        $query .= " recordtype VARCHAR(20) NOT NULL, ";
-        $query .= " recordid VARCHAR(50) NOT NULL, ";
-        $query .= " recordval VARCHAR(50) NOT NULL, ";
-        $query .= " dbid VARCHAR(10) NOT NULL DEFAULT '1')";
+        try {
+            if (!Capsule::schema()->hasTable(DB_PREFIX . 'payhostpaybatch')) {
+                Capsule::schema()->create(DB_PREFIX . 'payhostpaybatch', function ($table) {
+                    $table->increments('id');
+                    $table->string('recordtype', 20);
+                    $table->string('recordid', 50);
+                    $table->string('recordval', 50);
+                    $table->string('dbid', 10)->default('1');
+                    $table->timestamps();
+                });
+            }
 
-        return full_query($query);
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
     }
 }
 
 createPayhostpaybatchTable();
 
 /**
- * @param $pgid
- * @param $key
- * @param $reqid
+ * @param string $pgid
+ * @param string $key
+ * @param string $reqid
  *
  * @return array ['token' => $token, 'reference' => $reference, 'transactionId' => $transactionId]
  * @throws SoapFault
  *
- * PayHost Query Request to retrieve card token from authorised vault transaction
+ * Payfast Gateway Query Request to retrieve card token from authorised vault transaction
  */
-function getQuery($pgid, $key, $reqid)
+function getQuery(string $pgid, string $key, string $reqid): array
 {
-    $soap = <<<SOAP
+    $soap       = <<<SOAP
             <ns1:SingleFollowUpRequest>
                 <ns1:QueryRequest>
                     <ns1:Account>
-                        <ns1:PayGateId>{$pgid}</ns1:PayGateId>
-                        <ns1:Password>{$key}</ns1:Password>
+                        <ns1:PayGateId>$pgid</ns1:PayGateId>
+                        <ns1:Password>$key</ns1:Password>
                     </ns1:Account>
-                    <ns1:PayRequestId>{$reqid}</ns1:PayRequestId>
+                    <ns1:PayRequestId>$reqid</ns1:PayRequestId>
                 </ns1:QueryRequest>
             </ns1:SingleFollowUpRequest>
 SOAP;
-    $wsdl = PAYHOSTAPIWSDL;
-    $sc   = new SoapClient($wsdl, ['trace' => 1]);
+    $wsdl       = PAYHOSTAPIWSDL;
+    $soapClient = new SoapClient($wsdl, ['trace' => 1]);
     try {
-        $result = $sc->__soapCall(
+        $result = $soapClient->__soapCall(
             'SingleFollowUp',
             [
                 new SoapVar($soap, XSD_ANYXML),
@@ -79,16 +90,16 @@ SOAP;
         );
 
         if ($result) {
-            $vaultId       = $result->QueryResponse->Status->VaultId;
-            $reference     = $result->QueryResponse->Status->Reference;
-            $transactionId = $result->QueryResponse->Status->TransactionId;
-            $data1         = $result->QueryResponse->Status->PayVaultData[0]->value;
-            $data2         = $result->QueryResponse->Status->PayVaultData[1]->value;
-            $userId        = $result->QueryResponse->UserDefinedFields->value;
+            $vaultId       = $result->QueryResponse->Status->VaultId ?? null;
+            $reference     = $result->QueryResponse->Status->Reference ?? null;
+            $transactionId = $result->QueryResponse->Status->TransactionId ?? null;
+            $data1         = $result->QueryResponse->Status->PayVaultData[0]->value ?? null;
+            $data2         = $result->QueryResponse->Status->PayVaultData[1]->value ?? null;
+            $userId        = $result->QueryResponse->UserDefinedFields->value ?? null;
         } else {
             $vaultId = null;
         }
-    } catch (SoapFault $f) {
+    } catch (SoapFault $fault) {
         $vaultId = null;
     }
 
@@ -116,8 +127,8 @@ $gatewayModuleName = basename(__FILE__, '.php');
 $gatewayParams = getGatewayVariables($gatewayModuleName);
 
 // Die if module is not active.
-if ( ! $gatewayParams['type']) {
-    die("Module Not Activated");
+if (!$gatewayParams['type']) {
+    die('Module Not Activated');
 }
 
 // Check if we are in test mode
@@ -135,16 +146,16 @@ if ($testMode == 'on') {
 }
 
 // Retrieve data returned in payment gateway callback
-// We need to distinguish between a return from PayHost and a return from PayBatch
+// We need to distinguish between a return from Payfast Gateway and a return from PayBatch
 
 if (isset($_POST['PAY_REQUEST_ID']) && isset($_POST['TRANSACTION_STATUS'])) {
-    // PayHost postback
+    // Payfast Gateway postback
 
     logActivity('Postback: ' . json_encode($_POST));
     logTransaction($gatewayModuleName, null, 'Postback: ' . json_encode($_POST));
     $payRequestId             = filter_var($_POST['PAY_REQUEST_ID']);
-    $tblpayhostpaybatch       = _DB_PREFIX_ . 'payhostpaybatch';
-    $tblpayhostpaybatchvaults = _DB_PREFIX_ . 'payhostpaybatchvaults';
+    $tblpayhostpaybatch       = DB_PREFIX . 'payhostpaybatch';
+    $tblpayhostpaybatchvaults = DB_PREFIX . 'payhostpaybatchvaults';
     $reference                = Capsule::table($tblpayhostpaybatch)
                                        ->where('recordtype', 'transactionrecord')
                                        ->where('recordid', $payRequestId)
@@ -153,23 +164,28 @@ if (isset($_POST['PAY_REQUEST_ID']) && isset($_POST['TRANSACTION_STATUS'])) {
     logactivity('Reference: ' . $reference);
     logTransaction($gatewayModuleName, null, 'Reference: ' . $reference);
 
-    $status   = filter_var($_POST['TRANSACTION_STATUS'], FILTER_SANITIZE_STRING);
+    $status   = htmlspecialchars($_POST['TRANSACTION_STATUS'], ENT_QUOTES, 'UTF-8');
     $verified = false;
 
     // Verify transaction key
     $checkString = $payHostId . $payRequestId . $status . $reference . $payHostSecretKey;
     $check       = md5($checkString);
     $verified    = hash_equals($check, $_POST['CHECKSUM']);
-    if ( ! $verified) {
+    if (!$verified) {
         // Validity not verified
         // Failed
         logActivity('Validity not verified: ' . $payRequestId . '_' . $reference);
         callback3DSecureRedirect($reference, false);
     }
 
-    // Make a request to get the Vault Id
+    // Make a request to get the Vault id
     if ($verified && $status == 1) {
-        $response      = getQuery($payHostId, $payHostSecretKey, $payRequestId);
+        try {
+            $response = getQuery($payHostId, $payHostSecretKey, $payRequestId);
+        } catch (SoapFault $fault) {
+            die ($fault->getMessage() . PHP_EOL);
+        }
+
         $transactionId = $response['transactionId'];
         $card_number   = $response['vaultData1'];
         $card_expiry   = $response['vaultData2'];
@@ -177,7 +193,7 @@ if (isset($_POST['PAY_REQUEST_ID']) && isset($_POST['TRANSACTION_STATUS'])) {
 
         // Check for token and valid format
         $vaultPattern = '/^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$/';
-        $token        = ! empty($response['token']) ? $response['token'] : null;
+        $token        = !empty($response['token']) ? $response['token'] : null;
         if (preg_match($vaultPattern, $token) != 1) {
             $token = null;
         }
@@ -223,13 +239,21 @@ if (isset($_POST['PAY_REQUEST_ID']) && isset($_POST['TRANSACTION_STATUS'])) {
 
         // Check for duplicate transaction
         $duplicate = false;
-        foreach ($transactions['transactions']['transaction'] as $transaction) {
-            if ($transactionId == $transaction['transid']) {
-                $duplicate = true;
-                break;
+        if (isset($transactions['transactions']['transaction'])) {
+            $transactionList = $transactions['transactions']['transaction'];
+            // Handle both single transaction (array) and multiple transactions (array of arrays)
+            if (isset($transactionList['transid'])) {
+                // Single transaction
+                $transactionList = [$transactionList];
+            }
+            foreach ($transactionList as $transaction) {
+                if ($transactionId == $transaction['transid']) {
+                    $duplicate = true;
+                    break;
+                }
             }
         }
-        if ( ! $duplicate) {
+        if (!$duplicate) {
             // Add invoice payment
             $command = 'AddInvoicePayment';
             $data    = [
