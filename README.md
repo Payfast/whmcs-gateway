@@ -32,7 +32,7 @@ support@payfast.io should you require any assistance.
       are required for the PayBatch cron job to mark invoices as paid via the WHMCS API:
         - `WHMCS_API_ACCESS_KEY`: This is a unique key which should be generated randomly. It is stored in
           `"configuration.php"` and `"paybatch_cron_config.php"`.
-        - `WHMCS_API_URL`: This should point to the `api` directory of your installation, e.g. `https://yourdomain.name/includes/api.php`.
+        - `WHMCS_API_URL`: This should point to the `api` directory of your installation, e.g. `"https://yourdomain.name/includes/api.php"`.
         - `WHMCS_API_IDENTIFIER` and `$api_secret`: These are API keys configured in the admin section of your store;
           see https://developers.whmcs.com/api/authentication/. The API secret should be saved when created, as it is
           only shown once when creating new credentials. Use an existing API Role or create a new one that includes the
