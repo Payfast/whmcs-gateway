@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.1](https://github.com/Payfast/whmcs-gateway/releases/tag/v2.0.1)
+
+### Added
+
+#### Configuration & Documentation Improvements
+
+- Improved merchant-facing guidance for all WHMCS API configuration fields used by PayBatch transactions.
+- Added a dedicated header section above the PayBatch PayHost cron hook configuration settings to improve clarity and
+  grouping of related options.
+- Updated README documentation to clearly explain the purpose and usage of WHMCS configuration settings required for
+  PayBatch functionality.
+
+### Changed
+
+- Enhanced configuration interface usability by improving field descriptions and contextual guidance for merchants
+  configuring PayBatch and WHMCS API credentials.
+
 ## [2.0.0](https://github.com/Payfast/whmcs-gateway/releases/tag/v2.0.0)
 
 ### Added

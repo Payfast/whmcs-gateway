@@ -1,6 +1,9 @@
 <?php
+
+declare(strict_types=1);
+
 /*
- * Copyright (c) 2025 Payfast (Pty) Ltd
+ * Copyright (c) 2026 Payfast (Pty) Ltd
  *
  * Author: App Inlet (Pty) Ltd
  *
@@ -24,6 +27,27 @@ use WHMCS\Database\Capsule;
 
 if (!defined('DB_PREFIX')) {
     define('DB_PREFIX', 'tbl');
+}
+
+// -----------------------------------------------------------------------
+// Session-cookie guard — fixes "logged out after payment redirect" bug
+//
+// When PayGate sends the buyer back to this URL it does so via a
+// cross-site POST (3-D Secure redirect pattern).  Modern browsers apply
+// SameSite=Lax to session cookies, which means the cookie is NOT sent
+// with cross-site POST requests.  Without an inbound session cookie PHP
+// creates a brand-new anonymous session and queues a Set-Cookie response
+// header.  When the browser then follows the Location from
+// callback3DSecureRedirect it receives that new cookie and loses its
+// original authenticated session — the user appears to be logged out.
+//
+// Fix: if no session cookie arrived with this request, strip the
+// Set-Cookie header from our response so the browser keeps the real
+// session cookie it already holds.
+// -----------------------------------------------------------------------
+if (!headers_sent() && !isset($_COOKIE[session_name()])) {
+    header_remove('Set-Cookie');
+    session_write_close();
 }
 
 /**
@@ -55,6 +79,39 @@ if (!function_exists('createPayhostpaybatchTable')) {
 }
 
 createPayhostpaybatchTable();
+
+/**
+ * Idempotency lock table to prevent duplicate callbacks
+ */
+if (!function_exists('createPaygateCallbackLockTable')) {
+    function createPaygateCallbackLockTable(): bool
+    {
+        try {
+            $tableName = DB_PREFIX . 'paygate_callback_locks';
+
+            if (!Capsule::schema()->hasTable($tableName)) {
+                Capsule::schema()->create($tableName, function ($table) {
+                    $table->increments('id');
+                    $table->string('transaction_id', 50)->nullable();
+                    $table->string('pay_request_id', 50)->nullable();
+                    $table->integer('invoice_id')->unsigned()->nullable();
+                    $table->string('status', 20)->default('processing');
+                    $table->timestamps();
+
+                    // Atomic idempotency keys
+                    $table->unique('transaction_id');
+                    $table->unique('pay_request_id');
+                });
+            }
+
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+createPaygateCallbackLockTable();
 
 /**
  * @param string $pgid
@@ -90,12 +147,20 @@ SOAP;
         );
 
         if ($result) {
-            $vaultId       = $result->QueryResponse->Status->VaultId ?? null;
-            $reference     = $result->QueryResponse->Status->Reference ?? null;
-            $transactionId = $result->QueryResponse->Status->TransactionId ?? null;
-            $data1         = $result->QueryResponse->Status->PayVaultData[0]->value ?? null;
-            $data2         = $result->QueryResponse->Status->PayVaultData[1]->value ?? null;
-            $userId        = $result->QueryResponse->UserDefinedFields->value ?? null;
+            // Live PayGate servers return values with leading/trailing whitespace
+            // and newlines inside XML elements — trim every field defensively.
+            $vaultId       = isset($result->QueryResponse->Status->VaultId)
+                ? trim((string)$result->QueryResponse->Status->VaultId) : null;
+            $reference     = isset($result->QueryResponse->Status->Reference)
+                ? trim((string)$result->QueryResponse->Status->Reference) : null;
+            $transactionId = isset($result->QueryResponse->Status->TransactionId)
+                ? trim((string)$result->QueryResponse->Status->TransactionId) : null;
+            $data1         = isset($result->QueryResponse->Status->PayVaultData[0]->value)
+                ? trim((string)$result->QueryResponse->Status->PayVaultData[0]->value) : null;
+            $data2         = isset($result->QueryResponse->Status->PayVaultData[1]->value)
+                ? trim((string)$result->QueryResponse->Status->PayVaultData[1]->value) : null;
+            $userId        = isset($result->QueryResponse->UserDefinedFields->value)
+                ? trim((string)$result->QueryResponse->UserDefinedFields->value) : null;
         } else {
             $vaultId = null;
         }
@@ -103,17 +168,15 @@ SOAP;
         $vaultId = null;
     }
 
-
     $token = $vaultId;
-
 
     return [
         'token'         => $token,
-        'reference'     => $reference,
-        'transactionId' => $transactionId,
-        'vaultData1'    => $data1,
-        'vaultData2'    => $data2,
-        'userId'        => $userId,
+        'reference'     => $reference ?? null,
+        'transactionId' => $transactionId ?? null,
+        'vaultData1'    => $data1 ?? null,
+        'vaultData2'    => $data2 ?? null,
+        'userId'        => $userId ?? null,
     ];
 }
 
@@ -151,8 +214,13 @@ if ($testMode == 'on') {
 if (isset($_POST['PAY_REQUEST_ID']) && isset($_POST['TRANSACTION_STATUS'])) {
     // Payfast Gateway postback
 
-    logActivity('Postback: ' . json_encode($_POST));
-    logTransaction($gatewayModuleName, null, 'Postback: ' . json_encode($_POST));
+    // Log POST fields but redact the CHECKSUM to avoid credential leakage in Activity Log
+    $safePost = $_POST;
+    if (isset($safePost['CHECKSUM'])) {
+        $safePost['CHECKSUM'] = '***redacted***';
+    }
+    logActivity('Postback: ' . json_encode($safePost));
+    logTransaction($gatewayModuleName, null, 'Postback: ' . json_encode($safePost));
     $payRequestId             = filter_var($_POST['PAY_REQUEST_ID']);
     $tblpayhostpaybatch       = DB_PREFIX . 'payhostpaybatch';
     $tblpayhostpaybatchvaults = DB_PREFIX . 'payhostpaybatchvaults';
@@ -176,6 +244,7 @@ if (isset($_POST['PAY_REQUEST_ID']) && isset($_POST['TRANSACTION_STATUS'])) {
         // Failed
         logActivity('Validity not verified: ' . $payRequestId . '_' . $reference);
         callback3DSecureRedirect($reference, false);
+        exit;
     }
 
     // Make a request to get the Vault id
@@ -187,39 +256,101 @@ if (isset($_POST['PAY_REQUEST_ID']) && isset($_POST['TRANSACTION_STATUS'])) {
         }
 
         $transactionId = $response['transactionId'];
-        $card_number   = $response['vaultData1'];
-        $card_expiry   = $response['vaultData2'];
-        $userId        = $response['userId'];
+
+        // ---- Idempotency lock: first callback wins ----
+        if (empty($transactionId)) {
+            logActivity("Missing transactionId from query: {$payRequestId}_{$reference}");
+            logTransaction($gatewayModuleName, "Missing transactionId: {$payRequestId}_{$reference}", 'failed');
+            callback3DSecureRedirect($reference, false);
+            exit;
+        }
+
+        $lockTable = DB_PREFIX . 'paygate_callback_locks';
+
+        try {
+            Capsule::table($lockTable)->insert([
+                                                   'transaction_id' => $transactionId,
+                                                   'pay_request_id' => $payRequestId,
+                                                   'invoice_id'     => (int)$reference,
+                                                   'status'         => 'processing',
+                                                   'created_at'     => date('Y-m-d H:i:s'),
+                                                   'updated_at'     => date('Y-m-d H:i:s'),
+                                               ]);
+
+            logActivity("Lock acquired: {$payRequestId}_{$transactionId}_{$reference}");
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Duplicate key = already processed (or currently processing) this callback
+            logActivity("Duplicate callback blocked by lock: {$payRequestId}_{$transactionId}_{$reference}");
+            logTransaction(
+                $gatewayModuleName,
+                "Duplicate callback blocked by lock: {$payRequestId}_{$transactionId}_{$reference}",
+                'duplicate'
+            );
+            callback3DSecureRedirect($reference, true);
+            exit;
+        }
+
+        $card_number = (string)($response['vaultData1'] ?? '');
+        $card_expiry = (string)($response['vaultData2'] ?? '');
+        $userId      = $response['userId'];
 
         // Check for token and valid format
         $vaultPattern = '/^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$/';
-        $token        = !empty($response['token']) ? $response['token'] : null;
-        if (preg_match($vaultPattern, $token) != 1) {
+        $token        = !empty($response['token']) ? (string)$response['token'] : '';
+        if (preg_match($vaultPattern, $token) !== 1) {
             $token = null;
         }
 
-        // Store the token if valid
+        // Store the token if valid — wrapped in try/catch so a vault error never blocks invoice payment
         if ($token) {
-            $clientExists = Capsule::table($tblpayhostpaybatchvaults)
-                                   ->where('token', $token)
-                                   ->where('user_id', $userId)
-                                   ->value('token');
+            try {
+                // Priority 1: exact match (same token + same user) — refresh card details only
+                $byToken = Capsule::table($tblpayhostpaybatchvaults)
+                                  ->where('token', $token)
+                                  ->where('user_id', $userId)
+                                  ->first();
 
-            if (strlen($clientExists) > 0) {
-                Capsule::table($tblpayhostpaybatchvaults)
-                       ->where('token', $token)
-                       ->where('user_id', $userId)
-                       ->update(['card_number' => $card_number, 'card_expiry' => $card_expiry]);
-            } else {
-                Capsule::table($tblpayhostpaybatchvaults)
-                       ->insert(
-                           [
-                               'user_id'     => $userId,
-                               'token'       => $token,
-                               'card_number' => $card_number,
-                               'card_expiry' => $card_expiry,
-                           ]
-                       );
+                if ($byToken) {
+                    Capsule::table($tblpayhostpaybatchvaults)
+                           ->where('id', $byToken->id)
+                           ->update(['card_number' => $card_number, 'card_expiry' => $card_expiry]);
+                } else {
+                    // Priority 2: same card already stored for this user under a different (stale) token — replace it
+                    $byCard = Capsule::table($tblpayhostpaybatchvaults)
+                                     ->where('user_id', $userId)
+                                     ->where('card_number', $card_number)
+                                     ->where('card_expiry', $card_expiry)
+                                     ->first();
+
+                    if ($byCard) {
+                        // Mask tokens in logs — first 8 + last 4 chars of UUID
+                        $maskFn    = static fn(string $t): string => strlen($t) > 12
+                            ? substr($t, 0, 8) . '****' . substr($t, -4) : '****';
+                        $oldMasked = $maskFn((string)$byCard->token);
+                        $newMasked = $maskFn((string)$token);
+                        logActivity(
+                            "PayHost vault: Replacing stale token for user {$userId} card {$card_number} "
+                            . "(old: {$oldMasked} → new: {$newMasked})"
+                        );
+                        Capsule::table($tblpayhostpaybatchvaults)
+                               ->where('id', $byCard->id)
+                               ->update(
+                                   ['token' => $token, 'card_number' => $card_number, 'card_expiry' => $card_expiry]
+                               );
+                    } else {
+                        // Priority 3: genuinely new card for this user
+                        Capsule::table($tblpayhostpaybatchvaults)
+                               ->insert([
+                                            'user_id'     => $userId,
+                                            'token'       => $token,
+                                            'card_number' => $card_number,
+                                            'card_expiry' => $card_expiry,
+                                        ]);
+                    }
+                }
+            } catch (Throwable $vaultEx) {
+                // Vault storage failure must never prevent the invoice from being marked paid
+                logActivity("PayHost vault storage error (non-fatal): " . $vaultEx->getMessage());
             }
         }
 
@@ -229,55 +360,113 @@ if (isset($_POST['PAY_REQUEST_ID']) && isset($_POST['TRANSACTION_STATUS'])) {
             'invoiceid' => $reference,
         ];
         $invoice = localApi($command, $data);
-
-        // Get transactions for invoice
-        $command      = 'GetTransactions';
-        $data         = [
-            'invoiceid' => $reference,
+        // Log only safe fields — exclude client PII from Activity Log
+        $safeInvoice = [
+            'result'    => $invoice['result'] ?? null,
+            'invoiceid' => $invoice['invoiceid'] ?? null,
+            'status'    => $invoice['status'] ?? null,
+            'total'     => $invoice['total'] ?? null,
+            'balance'   => $invoice['balance'] ?? null,
         ];
-        $transactions = localAPI($command, $data);
+        logActivity("PayHost callback: GetInvoice result for {$reference}: " . json_encode($safeInvoice));
 
-        // Check for duplicate transaction
-        $duplicate = false;
-        if (isset($transactions['transactions']['transaction'])) {
-            $transactionList = $transactions['transactions']['transaction'];
-            // Handle both single transaction (array) and multiple transactions (array of arrays)
-            if (isset($transactionList['transid'])) {
-                // Single transaction
-                $transactionList = [$transactionList];
-            }
-            foreach ($transactionList as $transaction) {
-                if ($transactionId == $transaction['transid']) {
-                    $duplicate = true;
-                    break;
-                }
-            }
+        // WHMCS built-in callback guards (these die() if validation fails — logged above for diagnosis)
+        checkCbInvoiceID($reference, $gatewayModuleName);
+        checkCbTransID($transactionId);
+
+        // (Optional safety) If invoice already paid, do nothing
+        if (!empty($invoice['status']) && strtolower($invoice['status']) === 'paid') {
+            logActivity("Invoice already paid, skipping: {$reference} ({$transactionId})");
+            Capsule::table($lockTable)
+                   ->where('transaction_id', $transactionId)
+                   ->update([
+                                'status'     => 'completed',
+                                'updated_at' => date('Y-m-d H:i:s'),
+                            ]);
+            callback3DSecureRedirect($reference, true);
+            exit;
         }
-        if (!$duplicate) {
-            // Add invoice payment
-            $command = 'AddInvoicePayment';
-            $data    = [
-                'invoiceid' => $reference,
-                'transid'   => $transactionId,
-                'gateway'   => $gatewayModuleName,
-            ];
-            $result  = localAPI($command, $data);
+
+        // Add invoice payment
+        $command = 'AddInvoicePayment';
+        $data    = [
+            'invoiceid' => $reference,
+            'transid'   => $transactionId,
+            'gateway'   => $gatewayModuleName,
+        ];
+        $result  = localAPI($command, $data);
+
+        // Log only result/message — the full $result object may include card/client data
+        $safeResult = ['result' => $result['result'] ?? null, 'message' => $result['message'] ?? null];
+        logActivity(
+            "PayHost callback: AddInvoicePayment result for invoice {$reference} txid {$transactionId}: " . json_encode(
+                $safeResult
+            )
+        );
+
+        // Mark lock completed
+        Capsule::table($lockTable)
+               ->where('transaction_id', $transactionId)
+               ->update([
+                            'status'     => 'completed',
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ]);
+
+        if (isset($result['result']) && $result['result'] === 'success') {
             logTransaction($gatewayModuleName, $response, 'success');
             logActivity('Payment successful: ' . $payRequestId . '_' . $reference);
             callback3DSecureRedirect($reference, true);
         } else {
-            logActivity('Duplicate transaction: ' . $payRequestId . '_' . $transactionId . '_' . $reference);
-            logTransaction(
-                $gatewayModuleName,
-                'Duplicate transaction: ' . $payRequestId . '_' . $transactionId . '_' . $reference,
-                'duplicate'
+            logTransaction($gatewayModuleName, $result, 'AddInvoicePayment failed');
+            logActivity(
+                'AddInvoicePayment failed for: ' . $payRequestId . '_' . $reference . ' — ' . json_encode($result)
             );
             callback3DSecureRedirect($reference, false);
         }
+        exit;
     } else {
         // Failed
         logTransaction($gatewayModuleName, null, 'failed');
         logActivity('Payment failed: ' . $payRequestId . '_' . $reference);
         callback3DSecureRedirect($reference, false);
     }
+}
+
+// -----------------------------------------------------------------------
+// Browser return path (?return=1)
+//
+// PayGate POSTs to $returnUrl (this file + ?return=1) when redirecting the
+// buyer's browser back after payment.  We must NOT re-run AddInvoicePayment
+// here — the server-to-server notify (no ?return=1) already did that.
+// All we do is verify the CHECKSUM and issue the success / failure redirect
+// so the buyer lands on the correct WHMCS invoice page.
+// -----------------------------------------------------------------------
+if (!empty($_GET['return']) && isset($_POST['PAY_REQUEST_ID']) && isset($_POST['TRANSACTION_STATUS'])) {
+    $payRequestId = (string)filter_var($_POST['PAY_REQUEST_ID'], FILTER_SANITIZE_SPECIAL_CHARS);
+    // Keep status as raw string for CHECKSUM calculation (mirrors PayGate server-side calculation)
+    $statusRaw  = htmlspecialchars((string)$_POST['TRANSACTION_STATUS'], ENT_QUOTES, 'UTF-8');
+    $statusCode = (int)$_POST['TRANSACTION_STATUS'];
+
+    $tblpayhostpaybatch = DB_PREFIX . 'payhostpaybatch';
+    $reference          = Capsule::table($tblpayhostpaybatch)
+                                 ->where('recordtype', 'transactionrecord')
+                                 ->where('recordid', $payRequestId)
+                                 ->value('recordval');
+
+    $checkString = $payHostId . $payRequestId . $statusRaw . $reference . $payHostSecretKey;
+    $verified    = hash_equals(md5($checkString), (string)($_POST['CHECKSUM'] ?? ''));
+
+    logActivity(
+        'PayHost browser-return: payRequestId=' . $payRequestId
+        . ' reference=' . $reference
+        . ' status=' . $statusCode
+        . ' verified=' . ($verified ? 'yes' : 'no')
+    );
+
+    if ($verified && $statusCode === 1) {
+        callback3DSecureRedirect($reference, true);
+    } else {
+        callback3DSecureRedirect($reference, false);
+    }
+    exit;
 }

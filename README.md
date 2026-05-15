@@ -1,6 +1,6 @@
 # whmcs-gateway
 
-# Gateway WHMCS plugin v2.0.0 for WHMCS 8.13
+# Gateway WHMCS plugin v2.0.1 for WHMCS 8.13
 
 This is the Payfast Gateway plugin for WHMCS. Please feel free to contact the Payfast support team at
 support@payfast.io should you require any assistance.
@@ -10,7 +10,7 @@ support@payfast.io should you require any assistance.
 1. **Download the Plugin**
 
     - Visit the [releases page](https://github.com/Payfast/whmcs-gateway/releases) and
-      download [paybatch_payhost_plugin.zip](https://github.com/Payfast/whmcs-gateway/releases/download/v2.0.0/paybatch_payhost_plugin.zip).
+      download [paybatch_payhost_plugin.zip](https://github.com/Payfast/whmcs-gateway/releases/download/v2.0.1/paybatch_payhost_plugin.zip).
 
 2. **Install the Plugin**
 
@@ -30,13 +30,21 @@ support@payfast.io should you require any assistance.
 
     - In addition to the standard WHMCS configuration settings, **four additional entries are needed**. These settings
       are required for the PayBatch cron job to mark invoices as paid via the WHMCS API:
-        - `WHMCS_API_ACCESS_KEY`: This is a unique key which should be generated randomly. It is stored in
-          `"configuration.php"` and `"paybatch_cron_config.php"`.
-        - `WHMCS_API_URL`: This should point to the `api` directory of your installation, e.g. `"https://yourdomain.name/includes/api.php"`.
-        - `WHMCS_API_IDENTIFIER` and `$api_secret`: These are API keys configured in the admin section of your store;
-          see https://developers.whmcs.com/api/authentication/. The API secret should be saved when created, as it is
-          only shown once when creating new credentials. Use an existing API Role or create a new one that includes the
-          role **UpdateInvoice**.
+      #### WHMCS API Identifier
+        - Generated in **WHMCS Admin → System Settings → API Credentials**
+
+      #### WHMCS API Secret
+        - Generated together with the API Identifier
+        - **Visible only once at creation**
+        - Must be stored securely, as it cannot be retrieved later
+
+      #### WHMCS API Access Key (Optional)
+        - Only required for WHMCS installations using **strict API access control**
+        - Needed when IP whitelisting the PayBatch endpoint is not feasible
+        - Includes a direct link to the official documentation: https://developers.whmcs.com/api/access-control/
+
+      #### WHMCS API URL
+        - The full URL to the WHMCS API endpoint. Example: `https://yourdomain.com/includes/api.php`
 
 4. **Paybatch Setup**
 
