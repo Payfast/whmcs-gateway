@@ -4,18 +4,28 @@
 
 ### Added
 
-#### Configuration & Documentation Improvements
-
-- Improved merchant-facing guidance for all WHMCS API configuration fields used by PayBatch transactions.
-- Added a dedicated header section above the PayBatch PayHost cron hook configuration settings to improve clarity and
-  grouping of related options.
-- Updated README documentation to clearly explain the purpose and usage of WHMCS configuration settings required for
-  PayBatch functionality.
+- Added callback idempotency locking (`paygate_callback_locks`) with cron cleanup to prevent duplicate ITN/IPN
+  processing and keep callback lock state manageable.
+- Added safer callback logging with sensitive-field redaction.
+- Added PayBatch lifecycle guardrails and helper utilities for `uploadid`/`sent_invoice` state, query retry tracking,
+  and cycle-level failure blocking.
+- Added clearer WHMCS API credential guidance in module configuration and README, including `WHMCS_API_ACCESS_KEY`
+  usage and placement.
 
 ### Changed
 
-- Enhanced configuration interface usability by improving field descriptions and contextual guidance for merchants
-  configuring PayBatch and WHMCS API credentials.
+- Improved callback and PayBatch diagnostics with clearer state-based logging and safer payload handling.
+- Improved PayBatch invoice selection and batch processing flow to reduce stale submissions and improve reliability.
+- Simplified wording and structure for WHMCS API configuration fields.
+
+### Fixed
+
+- Fixed duplicate transaction processing caused by repeated PayGate callback delivery.
+- Fixed module behaviour where successful/failed batch outcomes were not consistently applied, which could lead to
+  repeat
+  daily debits.
+- Fixed callback return/session and vault token edge cases related to duplicate callback races.
+- Fixed WHMCS API credential/access-key handling paths used by PayBatch cron invoice updates.
 
 ## [2.0.0](https://github.com/Payfast/whmcs-gateway/releases/tag/v2.0.0)
 
