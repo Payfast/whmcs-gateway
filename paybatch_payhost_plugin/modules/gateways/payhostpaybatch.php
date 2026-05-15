@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Copyright (c) 2025 Payfast (Pty) Ltd
+ * Copyright (c) 2026 Payfast (Pty) Ltd
  *
  * Author: App Inlet (Pty) Ltd
  *
@@ -213,6 +213,10 @@ function payhostpaybatch_config(): array
             'FriendlyName' => 'Enable auto convert to ZAR for PayBatch',
             'Type'         => 'yesno',
             'Default'      => 'Yes',
+            'Description'  => 'Enable automatic conversion to ZAR for PayBatch processing.'
+                              . '<hr style="margin:12px 0;">'
+                              . '<strong>WHMCS API Credentials (Required for PayBatch Transactions)</strong><br>'
+                              . '<span style="color:#666;">The fields below are required for PayBatch transaction processing and cron automation.</span>',
         ],
         // WHMCS API Configuration for cron jobs
         'whmcs_api_identifier'        => [
@@ -220,21 +224,24 @@ function payhostpaybatch_config(): array
             'Type'         => 'text',
             'Size'         => '50',
             'Default'      => '',
-            'Description'  => 'Your WHMCS API Identifier for cron job access',
+            'Description'  => 'Generated in WHMCS Admin → System Settings → API Credentials.',
         ],
         'whmcs_api_secret'            => [
             'FriendlyName' => 'WHMCS API Secret',
             'Type'         => 'password',
             'Size'         => '50',
             'Default'      => '',
-            'Description'  => 'Your WHMCS API Secret for cron job access',
+            'Description'  => 'Generated with the API Identifier. Visible only once when created — store it securely.',
         ],
         'whmcs_api_access_key'        => [
-            'FriendlyName' => 'WHMCS API Access Key',
+            'FriendlyName' => 'WHMCS API Access Key (Optional)',
             'Type'         => 'password',
             'Size'         => '50',
             'Default'      => '',
-            'Description'  => 'Your WHMCS API Access Key for cron job access',
+            'Description'  => 'Optional. Only required if your WHMCS installation uses strict API access control. '
+                              . 'Use this when IP whitelisting the PayBatch endpoint is not feasible '
+                              . '<a href="https://developers.whmcs.com/api/access-control/" target="_blank" rel="noopener noreferrer">'
+                              . 'per WHMCS API Access Control documentation</a>.',
         ],
         'whmcs_api_url'               => [
             'FriendlyName' => 'WHMCS API URL',
