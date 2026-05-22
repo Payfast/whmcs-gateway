@@ -30,6 +30,14 @@ support@payfast.io should you require any assistance.
 
     - In addition to the standard WHMCS configuration settings, **four additional entries are needed**. These settings
       are required for the PayBatch cron job to mark invoices as paid via the WHMCS API:
+
+      #### Required WHMCS API Role Permissions
+        - The API Credential used by the PayBatch cron job must be assigned to an API Role that includes the following
+          **Allowed API Actions**:
+            - `UpdateInvoice`
+            - `GetTransactions`
+            - `AddInvoicePayment`
+
       #### WHMCS API Identifier
         - Generated in **WHMCS Admin → System Settings → API Credentials**
 
