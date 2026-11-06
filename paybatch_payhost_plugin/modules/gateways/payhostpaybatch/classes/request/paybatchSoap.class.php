@@ -10,7 +10,13 @@
  *
  */
 
+declare(strict_types=1);
+
 namespace Payhost\classes\request;
+
+use DOMDocument;
+use Exception;
+use SimpleXMLElement;
 
 /**
  *
@@ -75,26 +81,9 @@ class PaybatchSoap
     }
 
     /**
-     * @param $rootElement
-     * @param $uploadId
-     *
-     * @return array|string|string[]
-     */
-    private function processRequest(string $rootElement, string $uploadId): array|string
-    {
-        try {
-            $soap = $this->createSoapRequest($rootElement, $uploadId);
-
-            return $this->removeRootTag($soap, $rootElement);
-        } catch (Exception $exception) {
-            return $exception->getMessage();
-        }
-    }
-
-    /**
      * Request the query
      *
-     * @param $uploadId
+     * @param string $uploadId
      *
      * @return array|string|string[]
      */
@@ -108,14 +97,14 @@ class PaybatchSoap
     }
 
     /**
-     * @param $uploadId
+     * @param string $uploadId
      *
      * @return array|string|string[]
      */
     public function getConfirmRequest(string $uploadId): array|string
     {
         try {
-            return $this->createAndProcessRequest('Query', ['UploadID' => $uploadId]);
+            return $this->createAndProcessRequest('Confirm', ['UploadID' => $uploadId]);
         } catch (Exception $exception) {
             return $exception->getMessage();
         }
@@ -131,13 +120,24 @@ class PaybatchSoap
         $this->batchReference = date('Y-m-d') . '_' . uniqid();
         $this->setBatchData($data);
         try {
-            $authData = [
-                'BatchReference'  => $this->batchReference,
-                'NotificationUrl' => self::$notifyUrl,
-                'BatchData'       => $this->prepareBatchData($this->batchData)
-            ];
+            $xml = new SimpleXMLElement('<Auth />');
+            $xml->addChild('BatchReference', $this->batchReference);
+            $xml->addChild('NotificationUrl', self::$notifyUrl);
 
-            return $this->createAndProcessRequest('Auth', $authData);
+            $batchDataNode = $xml->addChild('BatchData');
+            foreach ($this->batchData as $line) {
+                $batchLine = '';
+                foreach ($line as $item) {
+                    $batchLine .= $item . ',';
+                }
+                $batchDataNode->addChild('BatchLine', rtrim($batchLine, ','));
+            }
+
+            $dom = new DOMDocument();
+            $dom->loadXML($xml->asXML());
+            $soap = $dom->saveXML($dom->documentElement);
+
+            return $this->removeRootTag($soap, 'Auth');
         } catch (Exception $exception) {
             return $exception->getMessage();
         }
@@ -172,10 +172,10 @@ class PaybatchSoap
     {
         foreach ($data as $key => $value) {
             if (is_array($value)) {
-                $child = $xml->addChild($key);
+                $child = $xml->addChild((string)$key);
                 $this->addDataToXml($child, $value);
             } else {
-                $xml->addChild($key, (string)$value);
+                $xml->addChild((string)$key, (string)$value);
             }
         }
     }

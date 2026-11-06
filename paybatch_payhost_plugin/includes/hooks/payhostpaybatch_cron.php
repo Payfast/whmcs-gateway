@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use WHMCS\Database\Capsule;
 
 if (!defined('WHMCS')) {

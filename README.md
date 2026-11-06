@@ -1,6 +1,6 @@
 # whmcs-gateway
 
-# Gateway WHMCS plugin v2.0.1 for WHMCS 8.13
+# Gateway WHMCS plugin v2.1.0 for WHMCS 8.13
 
 This is the Payfast Gateway plugin for WHMCS. Please feel free to contact the Payfast support team at
 support@payfast.io should you require any assistance.
@@ -10,7 +10,7 @@ support@payfast.io should you require any assistance.
 1. **Download the Plugin**
 
     - Visit the [releases page](https://github.com/Payfast/whmcs-gateway/releases) and
-      download [paybatch_payhost_plugin.zip](https://github.com/Payfast/whmcs-gateway/releases/download/v2.0.1/paybatch_payhost_plugin.zip).
+      download [paybatch_payhost_plugin.zip](https://github.com/Payfast/whmcs-gateway/releases/download/v2.1.0/paybatch_payhost_plugin.zip).
 
 2. **Install the Plugin**
 

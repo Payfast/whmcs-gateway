@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * Copyright (c) 2026 Payfast (Pty) Ltd
  *
@@ -278,7 +280,7 @@ function payhostpaybatch_link($params): string
                                ->get();
         $vaultPattern = '/^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$/';
         foreach ($vaults as $vault) {
-            if (preg_match($vaultPattern, $vault->token) == 1) {
+            if (preg_match($vaultPattern, (string)($vault->token ?? '')) === 1) {
                 $vaultIds[] = $vault;
             }
         }
@@ -377,7 +379,20 @@ function payhostpaybatch_initiate(array $params): void
     $city      = $clientDetails['city'];
     $state     = $clientDetails['state'];
     $postcode  = $clientDetails['postcode'];
-    $country   = $clientDetails['country'] == 'ZA' ? 'ZAF' : $clientDetails['country'];
+    $iso2ToIso3 = [
+        'ZA' => 'ZAF',
+        'NA' => 'NAM',
+        'BW' => 'BWA',
+        'SZ' => 'SWZ',
+        'LS' => 'LSO',
+        'MZ' => 'MOZ',
+        'ZW' => 'ZWE',
+        'US' => 'USA',
+        'GB' => 'GBR',
+    ];
+
+    $rawCountry = strtoupper((string)($clientDetails['country'] ?? ''));
+    $country = $iso2ToIso3[$rawCountry] ?? (strlen($rawCountry) === 3 ? $rawCountry : 'ZAF');
     $phone     = $clientDetails['phone'];
 
     // Invoice Parameters
@@ -390,12 +405,12 @@ function payhostpaybatch_initiate(array $params): void
     $tblpayhostpaybatch = DB_PREFIX . 'payhostpaybatch';
     if ($vaulting) {
         $tblpayhostpaybatchvaults = DB_PREFIX . 'payhostpaybatchvaults';
-        $vaultId                  = Capsule::table($tblpayhostpaybatchvaults)
+        $vaultId                  = (string)(Capsule::table($tblpayhostpaybatchvaults)
                                            ->where('user_id', $params['clientdetails']['userid'])
                                            ->where('id', $vault_id ?? null)
-                                           ->value('token');
+                                           ->value('token') ?? '');
         $vaultPattern             = '/^[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}$/';
-        if (preg_match($vaultPattern, $vaultId) != 1) {
+        if (preg_match($vaultPattern, $vaultId) !== 1) {
             $vaultId = '';
         }
     }
@@ -406,29 +421,29 @@ function payhostpaybatch_initiate(array $params): void
 
     // Set data
     $data                  = [];
-    $data['pgid']          = $payHostId;
-    $data['encryptionKey'] = $payHostSecretKey;
-    $data['reference']     = $invoiceId;
-    $data['amount']        = intval($amount * 100);
-    $data['currency']      = $currencyCode;
-    $data['transDate']     = $transactionDate;
+    $data['pgid']          = (string)$payHostId;
+    $data['encryptionKey'] = (string)$payHostSecretKey;
+    $data['reference']     = (string)$invoiceId;
+    $data['amount']        = (string)(int)round((float)$amount * 100);
+    $data['currency']      = (string)$currencyCode;
+    $data['transDate']     = (string)$transactionDate;
     $data['locale']        = 'en-us';
-    $data['firstName']     = $firstname;
-    $data['lastName']      = $lastname;
-    $data['email']         = $email;
-    $data['customerTitle'] = $data['customerTitle'] ?? 'Mr';
-    $data['country']       = $country ?? 'ZAF';
-    $data['retUrl']        = $returnUrl;
-    $data['notifyURL']     = $notifyUrl;
+    $data['firstName']     = (string)$firstname;
+    $data['lastName']      = (string)$lastname;
+    $data['email']         = (string)$email;
+    $data['customerTitle'] = 'Mr';
+    $data['country']       = (string)($country ?? 'ZAF');
+    $data['retUrl']        = (string)$returnUrl;
+    $data['notifyURL']     = (string)$notifyUrl;
     $data['recurring']     = false;
     $data['userKey1']      = 'user_id';
-    $data['userField1']    = $user_id;
-    $data['state']         = $state;
-    $data['address1']      = $address1;
-    $data['address2']      = $address2;
-    $data['city']          = $city;
-    $data['postcode']      = $postcode;
-    $data['phone']         = $phone;
+    $data['userField1']    = (string)$user_id;
+    $data['state']         = (string)($state ?? '');
+    $data['address1']      = (string)($address1 ?? '');
+    $data['address2']      = (string)($address2 ?? '');
+    $data['city']          = (string)($city ?? '');
+    $data['postcode']      = (string)($postcode ?? '');
+    $data['phone']         = (string)($phone ?? '');
 
     if ($vaulting) {
         $data['vaulting'] = true;
@@ -470,6 +485,10 @@ function sendSOAPRequest(string $xml, string $tblpayhostpaybatch, string $payHos
                 new SoapVar($xml, XSD_ANYXML),
             ]
         );
+
+        // Log the full response for diagnostics (redact sensitive fields)
+        $safeResponse = json_encode($result, JSON_PRETTY_PRINT);
+        logActivity('PayHost SinglePayment response: ' . $safeResponse);
 
         if (property_exists($result->WebPaymentResponse, 'Redirect')) {
             // Redirect to Payment Portal
@@ -516,10 +535,24 @@ function sendSOAPRequest(string $xml, string $tblpayhostpaybatch, string $payHos
 HTML;
             }
         } else {
-            echo 'No redirect URL found in response.';
+            // Log what we actually got so we can diagnose the issue
+            $statusCode  = $result->WebPaymentResponse->Status->StatusName  ?? 'unknown';
+            $resultCode  = $result->WebPaymentResponse->Status->ResultCode  ?? 'unknown';
+            $resultDesc  = $result->WebPaymentResponse->Status->ResultDescription ?? 'unknown';
+            $txId        = $result->WebPaymentResponse->Status->TransactionId     ?? 'unknown';
+
+            $msg = "PayHost SinglePayment: no Redirect in response"
+                . " | StatusName={$statusCode}"
+                . " | ResultCode={$resultCode}"
+                . " | ResultDescription={$resultDesc}"
+                . " | TransactionId={$txId}";
+
+            logActivity($msg);
+            echo htmlspecialchars("Payment initialisation failed: {$resultDesc} (code {$resultCode})", ENT_QUOTES, 'UTF-8');
         }
     } catch (SoapFault $fault) {
-        echo 'SOAP Fault: ' . $fault->getMessage();
+        logActivity('PayHost SinglePayment SOAP Fault: ' . $fault->getMessage());
+        echo 'SOAP Fault: ' . htmlspecialchars($fault->getMessage(), ENT_QUOTES, 'UTF-8');
     }
 }
 

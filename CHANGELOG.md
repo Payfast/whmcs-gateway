@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.1.0](https://github.com/Payfast/whmcs-gateway/releases/tag/v2.1.0)
+
+### Changed
+
+- Updated the Gateway module for PHP 8.3 compatibility, including strict typing and safer string handling throughout the PayHost and PayBatch SOAP request path.
+- Replaced dynamic user-defined field properties with an explicit field list so custom SOAP fields remain valid on PHP 8.2 and later.
+
+### Fixed
+
+- Mapped two-letter ISO country codes to three-letter codes in the PayHost SOAP payload so new-card payments no longer fail SOAP validation.
+- Used the client postcode when a dedicated zip field is absent, so billing address data is complete in the SOAP request.
+- Logged PayHost SinglePayment responses and SOAP faults, and escaped fault messages shown to the client.
+- Corrected the PayBatch confirm request so it sends a Confirm operation rather than a Query operation.
+
 ## [2.0.1](https://github.com/Payfast/whmcs-gateway/releases/tag/v2.0.1)
 
 ### Added
