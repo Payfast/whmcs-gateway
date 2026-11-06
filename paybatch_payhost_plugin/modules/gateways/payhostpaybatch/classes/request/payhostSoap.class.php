@@ -9,6 +9,8 @@
  * Helper class to make SOAP call to Payfast Gateway endpoint
  */
 
+declare(strict_types=1);
+
 namespace Payhost\classes\request;
 
 require_once __DIR__ . '/PayhostVault.php';
@@ -90,12 +92,12 @@ class PayhostSoap
         );
         $paymentType  = new PaymentType();
         $order        = new Order(
-            $this->data['reference'] ?? '',
-            $this->data['currency'] ?? '',
-            $this->data['amount'] ?? '',
-            $this->data['transDate'] ?? '',
-            $this->data['locale'] ?? '',
-            $this->data['customerTitle'] ?? '',
+            (string)($this->data['reference'] ?? ''),
+            (string)($this->data['currency'] ?? ''),
+            (string)($this->data['amount'] ?? ''),
+            (string)($this->data['transDate'] ?? ''),
+            (string)($this->data['locale'] ?? ''),
+            (string)($this->data['customerTitle'] ?? ''),
         );
         $risk         = new Risk();
         $userFields   = new UserFields();

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Payhost\classes\request;
 
 class Customer
@@ -146,11 +148,11 @@ XML;
     public function getAddress(array $dataArray): string
     {
         $namespace = self::$ns;
-        $address1  = $dataArray['address1'];
-        $city      = $dataArray['city'];
-        $country   = $dataArray['country'];
-        $state     = $dataArray['state'];
-        $zip       = $dataArray['zip'];
+        $address1  = $dataArray['address1'] ?? '';
+        $city      = $dataArray['city'] ?? '';
+        $country   = $dataArray['country'] ?? '';
+        $state     = $dataArray['state'] ?? '';
+        $zip       = $dataArray['zip'] ?? $dataArray['postcode'] ?? '';
 
         return <<<XML
 <!-- Address Details -->
